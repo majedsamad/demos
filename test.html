@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demos.html Unit Test</title>
+    <style>
+        body { font-family: sans-serif; }
+        .pass { color: green; }
+        .fail { color: red; }
+        table { border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px; }
+        th { background-color: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>Unit Tests for demos.html</h1>
+    <table id="resultsTable">
+        <thead>
+            <tr>
+                <th>Test Case</th>
+                <th>Result</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <script>
+        async function runTests() {
+            const resultsTableBody = document.querySelector("#resultsTable tbody");
+
+            function addResult(testCase, result, details = "") {
+                const row = resultsTableBody.insertRow();
+                const testCaseCell = row.insertCell();
+                const resultCell = row.insertCell();
+                const detailsCell = row.insertCell();
+
+                testCaseCell.textContent = testCase;
+                resultCell.textContent = result ? "PASS" : "FAIL";
+                resultCell.className = result ? "pass" : "fail";
+                detailsCell.textContent = details;
+            }
+
+            try {
+                const response = await fetch("demos.html");
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch demos.html: ${response.status} ${response.statusText}`);
+                }
+                const htmlText = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlText, "text/html");
+
+                // 1. CSS Link Check
+                const linkTag = doc.querySelector('link[rel="stylesheet"]');
+                let cssLinkCheckPass = false;
+                let cssLinkDetails = "Link tag not found.";
+                if (linkTag) {
+                    if (linkTag.getAttribute('href') === 'style.css') {
+                        cssLinkCheckPass = true;
+                        cssLinkDetails = 'href="style.css" found.';
+                    } else {
+                        cssLinkDetails = `href is "${linkTag.getAttribute('href')}" instead of "style.css".`;
+                    }
+                }
+                addResult("CSS Link Check", cssLinkCheckPass, cssLinkDetails);
+
+                // 2. Key Element Presence
+                const h1Element = doc.querySelector('h1');
+                addResult("H1 Element Present", !!h1Element, h1Element ? "H1 found." : "H1 not found.");
+
+                const tableElement = doc.querySelector('table');
+                addResult("Table Element Present", !!tableElement, tableElement ? "Table found." : "Table not found.");
+                
+                // For style checks, we need to append to the current document to use getComputedStyle
+                // We'll do this in a hidden iframe to avoid messing with the current page display
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
+                
+                const iframeDoc = iframe.contentWindow.document;
+                iframeDoc.open();
+                iframeDoc.write(htmlText);
+                iframeDoc.close();
+
+                // Wait for styles to be applied in the iframe
+                await new Promise(resolve => setTimeout(resolve, 100)); 
+
+
+                // 3. Basic Style Checks
+                const bodyStyle = iframe.contentWindow.getComputedStyle(iframeDoc.body);
+                const bodyBgColor = bodyStyle.backgroundColor;
+                const bodyBgCheckPass = bodyBgColor === 'rgb(244, 244, 244)' || bodyBgColor === '#f4f4f4';
+                addResult("Body Background Color Check", bodyBgCheckPass, `Actual: ${bodyBgColor}`);
+
+                const h1Style = iframe.contentWindow.getComputedStyle(iframeDoc.querySelector('h1'));
+                const h1FontSize = h1Style.fontSize;
+                // Note: '2.5em' might be computed to px. We'll check if it's reasonably large.
+                // Assuming default font size is 16px, 2.5em = 40px.
+                // We'll fetch the font size from style.css to be more precise
+                let h1FontSizeCheckPass = false;
+                let h1FontSizeDetails = `Actual: ${h1FontSize}`;
+                
+                try {
+                    const cssResponse = await fetch("style.css");
+                    if (!cssResponse.ok) throw new Error("Failed to fetch style.css");
+                    const cssText = await cssResponse.text();
+                    
+                    // Simple parsing for h1 font-size
+                    const h1RuleMatch = cssText.match(/h1\s*\{[^}]*font-size\s*:\s*([^;]+)\s*;/i);
+                    if (h1RuleMatch && h1RuleMatch[1]) {
+                        const expectedH1FontSize = h1RuleMatch[1].trim(); // e.g., "2.5em"
+                         h1FontSizeDetails += ` (Expected based on style.css: ${expectedH1FontSize})`;
+                        // If expected is in 'em', we need to calculate the pixel value relative to iframe's default
+                        if (expectedH1FontSize.endsWith('em')) {
+                            const emValue = parseFloat(expectedH1FontSize);
+                            const parentFontSize = parseFloat(iframe.contentWindow.getComputedStyle(iframeDoc.body).fontSize); // Assuming h1's parent is body for em calculation
+                            const expectedPx = emValue * parentFontSize;
+                            h1FontSizeCheckPass = Math.abs(parseFloat(h1FontSize) - expectedPx) < 1; // Allow small tolerance
+                            h1FontSizeDetails += ` ~${expectedPx.toFixed(2)}px`;
+                        } else if (expectedH1FontSize.endsWith('px')) {
+                             h1FontSizeCheckPass = parseFloat(h1FontSize) === parseFloat(expectedH1FontSize);
+                        } else {
+                            // Fallback for other units or if parsing is tricky
+                            h1FontSizeCheckPass = h1FontSize === expectedH1FontSize;
+                        }
+                    } else {
+                         h1FontSizeDetails += " (Could not parse expected h1 font-size from style.css)";
+                    }
+                } catch (e) {
+                    h1FontSizeDetails += ` (Error fetching/parsing style.css: ${e.message})`;
+                }
+                addResult("H1 Font Size Check", h1FontSizeCheckPass, h1FontSizeDetails);
+                
+                document.body.removeChild(iframe); // Clean up iframe
+
+            } catch (error) {
+                console.error("Test execution error:", error);
+                const row = resultsTableBody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 3;
+                cell.textContent = `Error running tests: ${error.message}`;
+                cell.className = "fail";
+            }
+        }
+
+        window.onload = runTests;
+    </script>
+</body>
+</html>
